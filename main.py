@@ -208,7 +208,8 @@ def parse_arguments() -> argparse.Namespace:
 def run_full_analysis(
     config: Config,
     args: argparse.Namespace,
-    stock_codes: Optional[List[str]] = None
+    stock_codes: Optional[List[str]] = None,
+    market_review_enabled_override: Optional[bool] = None
 ):
     """
     执行完整的分析流程（个股 + 大盘复盘）
@@ -233,15 +234,23 @@ def run_full_analysis(
             send_notification=not args.no_notify
         )
 
+        # 计算本次执行是否启用大盘复盘
+        if args.no_market_review:
+            should_run_market_review = False
+        elif market_review_enabled_override is not None:
+            should_run_market_review = market_review_enabled_override
+        else:
+            should_run_market_review = config.market_review_enabled
+
         # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
         analysis_delay = getattr(config, 'analysis_delay', 0)
-        if analysis_delay > 0 and config.market_review_enabled and not args.no_market_review:
+        if analysis_delay > 0 and should_run_market_review:
             logger.info(f"等待 {analysis_delay} 秒后执行大盘复盘（避免API限流）...")
             time.sleep(analysis_delay)
 
         # 2. 运行大盘复盘（如果启用且不是仅个股模式）
         market_report = ""
-        if config.market_review_enabled and not args.no_market_review:
+        if should_run_market_review:
             # 只调用一次，并获取结果
             review_result = run_market_review(
                 notifier=pipeline.notifier,
@@ -417,17 +426,34 @@ def main() -> int:
         # 模式2: 定时任务模式
         if args.schedule or config.schedule_enabled:
             logger.info("模式: 定时任务")
-            logger.info(f"每日执行时间: {config.schedule_time}")
+            assert config.schedule_tasks, "schedule_tasks不能为空"
+            logger.info("定时任务列表:")
+            for schedule_task in config.schedule_tasks:
+                review_status = "启用" if schedule_task.market_review_enabled else "关闭"
+                logger.info(f"  - {schedule_task.time} (大盘复盘: {review_status})")
             
             from src.scheduler import run_with_schedule
             
-            def scheduled_task():
-                run_full_analysis(config, args, stock_codes)
+            def build_scheduled_task(market_review_enabled: bool):
+                def scheduled_task():
+                    run_full_analysis(
+                        config,
+                        args,
+                        stock_codes,
+                        market_review_enabled_override=market_review_enabled
+                    )
+                return scheduled_task
+
+            schedule_tasks = [
+                (task_config.time, build_scheduled_task(task_config.market_review_enabled))
+                for task_config in config.schedule_tasks
+            ]
             
             run_with_schedule(
-                task=scheduled_task,
-                schedule_time=config.schedule_time,
-                run_immediately=True  # 启动时先执行一次
+                task=schedule_tasks[0][1],
+                schedule_time=schedule_tasks[0][0],
+                schedule_tasks=schedule_tasks,
+                run_immediately=config.schedule_run_immediately
             )
             return 0
         

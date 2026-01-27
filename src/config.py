@@ -16,6 +16,57 @@ from typing import List, Optional
 from dotenv import load_dotenv, dotenv_values
 from dataclasses import dataclass, field
 
+SCHEDULE_TASK_TRUE_VALUES = {"true", "1", "yes", "y", "on"}
+SCHEDULE_TASK_FALSE_VALUES = {"false", "0", "no", "n", "off"}
+
+
+@dataclass(frozen=True)
+class ScheduleTaskConfig:
+    time: str
+    market_review_enabled: bool
+
+
+def _parse_bool(value: Optional[str], default_value: bool) -> bool:
+    if value is None:
+        return default_value
+    normalized_value = value.strip().lower()
+    if not normalized_value:
+        return default_value
+    if normalized_value in SCHEDULE_TASK_TRUE_VALUES:
+        return True
+    if normalized_value in SCHEDULE_TASK_FALSE_VALUES:
+        return False
+    return default_value
+
+
+def _parse_schedule_tasks(
+    raw_value: str,
+    default_market_review_enabled: bool
+) -> List[ScheduleTaskConfig]:
+    if not raw_value:
+        return []
+    schedule_tasks: List[ScheduleTaskConfig] = []
+    for item in raw_value.split(','):
+        item = item.strip()
+        if not item:
+            continue
+        if '|' in item:
+            time_value, review_value = item.split('|', 1)
+            schedule_time = time_value.strip()
+            if not schedule_time:
+                continue
+            market_review_enabled = _parse_bool(review_value, default_market_review_enabled)
+        else:
+            schedule_time = item
+            market_review_enabled = default_market_review_enabled
+        schedule_tasks.append(
+            ScheduleTaskConfig(
+                time=schedule_time,
+                market_review_enabled=market_review_enabled
+            )
+        )
+    return schedule_tasks
+
 
 @dataclass
 class Config:
@@ -124,6 +175,8 @@ class Config:
     # === 定时任务配置 ===
     schedule_enabled: bool = False            # 是否启用定时任务
     schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
+    schedule_tasks: List[ScheduleTaskConfig] = field(default_factory=list)  # 多时间点定时任务
+    schedule_run_immediately: bool = False    # 启动时是否立即执行一次
     market_review_enabled: bool = True        # 是否启用大盘复盘
 
     # === 实时行情增强数据配置 ===
@@ -283,6 +336,25 @@ class Config:
         
         serpapi_keys_str = os.getenv('SERPAPI_API_KEYS', '')
         serpapi_keys = [k.strip() for k in serpapi_keys_str.split(',') if k.strip()]
+
+        schedule_enabled = os.getenv('SCHEDULE_ENABLED', 'false').lower() == 'true'
+        schedule_time = os.getenv('SCHEDULE_TIME', '18:00').strip()
+        market_review_enabled = os.getenv('MARKET_REVIEW_ENABLED', 'true').lower() == 'true'
+        schedule_run_immediately = _parse_bool(
+            os.getenv('SCHEDULE_RUN_IMMEDIATELY'),
+            False
+        )
+        schedule_tasks = _parse_schedule_tasks(
+            os.getenv('SCHEDULE_TASKS', ''),
+            market_review_enabled
+        )
+        if not schedule_tasks:
+            schedule_tasks = [
+                ScheduleTaskConfig(
+                    time=schedule_time,
+                    market_review_enabled=market_review_enabled
+                )
+            ]
         
         return cls(
             stock_list=stock_list,
@@ -331,9 +403,11 @@ class Config:
             debug=os.getenv('DEBUG', 'false').lower() == 'true',
             http_proxy=os.getenv('HTTP_PROXY'),
             https_proxy=os.getenv('HTTPS_PROXY'),
-            schedule_enabled=os.getenv('SCHEDULE_ENABLED', 'false').lower() == 'true',
-            schedule_time=os.getenv('SCHEDULE_TIME', '18:00'),
-            market_review_enabled=os.getenv('MARKET_REVIEW_ENABLED', 'true').lower() == 'true',
+            schedule_enabled=schedule_enabled,
+            schedule_time=schedule_time,
+            schedule_tasks=schedule_tasks,
+            schedule_run_immediately=schedule_run_immediately,
+            market_review_enabled=market_review_enabled,
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=int(os.getenv('WEBUI_PORT', '8000')),

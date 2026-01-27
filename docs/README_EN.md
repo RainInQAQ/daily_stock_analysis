@@ -315,6 +315,8 @@ SINGLE_STOCK_NOTIFY=true       # Push immediately after each stock analysis
 
 # === Schedule ===
 SCHEDULE_ENABLED=true          # Enable scheduled task
+SCHEDULE_TASKS=19:00|true,12:00|false  # Multiple schedules with review toggle
+SCHEDULE_RUN_IMMEDIATELY=false # Run immediately on startup
 SCHEDULE_TIME=18:00            # Daily run time (HH:MM, 24-hour format)
 MARKET_REVIEW_ENABLED=true     # Enable market review
 

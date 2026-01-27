@@ -140,7 +140,7 @@ class Scheduler:
                 logger.error(f"定时任务设置失败，执行时间: {schedule_time}，原因: {exc}")
         
         if run_immediately:
-            first_time, first_task = tasks[0]
+            first_time, first_task, _ = tasks[0]
             logger.info("立即执行一次任务...")
             self._safe_run_task(first_task, first_time)
     

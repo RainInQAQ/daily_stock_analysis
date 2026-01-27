@@ -19,9 +19,18 @@ import sys
 import time
 import threading
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
+SCHEDULE_TASK_WEEKDAY_METHODS = {
+    1: "monday",
+    2: "tuesday",
+    3: "wednesday",
+    4: "thursday",
+    5: "friday",
+    6: "saturday",
+    7: "sunday"
+}
 
 
 class GracefulShutdown:
@@ -93,29 +102,110 @@ class Scheduler:
         self._task_callback = task
         
         # 设置每日定时任务
-        self.schedule.every().day.at(self.schedule_time).do(self._safe_run_task)
+        self._schedule_job(self.schedule_time, task, None)
         logger.info(f"已设置每日定时任务，执行时间: {self.schedule_time}")
         
         if run_immediately:
             logger.info("立即执行一次任务...")
-            self._safe_run_task()
+            self._safe_run_task(task, self.schedule_time)
+
+    def set_daily_tasks(
+        self,
+        tasks: List[Tuple[str, Callable, Optional[List[int]]]],
+        run_immediately: bool = True
+    ):
+        """
+        设置多个定时任务（支持指定星期）
+        
+        Args:
+            tasks: (执行时间, 任务函数, 星期列表) 列表
+            run_immediately: 是否在设置后立即执行一次
+        """
+        assert tasks, "tasks不能为空"
+        for schedule_time, task, days_of_week in tasks:
+            assert schedule_time, "schedule_time不能为空"
+            assert callable(task), "task必须可调用"
+            try:
+                if days_of_week:
+                    for weekday in days_of_week:
+                        self._schedule_job(schedule_time, task, weekday)
+                    logger.info(
+                        f"已设置定时任务，执行时间: {schedule_time}，星期: "
+                        f"{self._format_weekdays(days_of_week)}"
+                    )
+                else:
+                    self._schedule_job(schedule_time, task, None)
+                    logger.info(f"已设置每日定时任务，执行时间: {schedule_time}")
+            except Exception as exc:
+                logger.error(f"定时任务设置失败，执行时间: {schedule_time}，原因: {exc}")
+        
+        if run_immediately:
+            first_time, first_task, _ = tasks[0]
+            logger.info("立即执行一次任务...")
+            self._safe_run_task(first_task, first_time)
     
-    def _safe_run_task(self):
+    def _safe_run_task(
+        self,
+        task_callback: Optional[Callable] = None,
+        schedule_time: Optional[str] = None
+    ):
         """安全执行任务（带异常捕获）"""
-        if self._task_callback is None:
+        callback = task_callback or self._task_callback
+        if callback is None:
             return
+        assert callable(callback), "任务回调必须可调用"
         
         try:
             logger.info("=" * 50)
-            logger.info(f"定时任务开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            if schedule_time:
+                logger.info(
+                    f"定时任务开始执行({schedule_time}) - "
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            else:
+                logger.info(f"定时任务开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info("=" * 50)
             
-            self._task_callback()
+            callback()
             
-            logger.info(f"定时任务执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            if schedule_time:
+                logger.info(
+                    f"定时任务执行完成({schedule_time}) - "
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            else:
+                logger.info(f"定时任务执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
         except Exception as e:
             logger.exception(f"定时任务执行失败: {e}")
+
+    def _schedule_job(
+        self,
+        schedule_time: str,
+        task: Callable,
+        weekday: Optional[int]
+    ) -> None:
+        if weekday is None:
+            self.schedule.every().day.at(schedule_time).do(
+                self._safe_run_task,
+                task,
+                schedule_time
+            )
+            return
+        day_method_name = SCHEDULE_TASK_WEEKDAY_METHODS.get(weekday)
+        if day_method_name is None:
+            raise ValueError(f"无效的星期配置: {weekday}")
+        schedule_day = getattr(self.schedule.every(), day_method_name)
+        schedule_day.at(schedule_time).do(
+            self._safe_run_task,
+            task,
+            schedule_time
+        )
+
+    @staticmethod
+    def _format_weekdays(days_of_week: List[int]) -> str:
+        assert days_of_week, "days_of_week不能为空"
+        return ",".join(str(day) for day in days_of_week)
     
     def run(self):
         """
@@ -153,7 +243,8 @@ class Scheduler:
 def run_with_schedule(
     task: Callable,
     schedule_time: str = "18:00",
-    run_immediately: bool = True
+    run_immediately: bool = True,
+    schedule_tasks: Optional[List[Tuple[str, Callable, Optional[List[int]]]]] = None
 ):
     """
     便捷函数：使用定时调度运行任务
@@ -162,9 +253,13 @@ def run_with_schedule(
         task: 要执行的任务函数
         schedule_time: 每日执行时间
         run_immediately: 是否立即执行一次
+        schedule_tasks: 多时间点任务列表（含星期配置）
     """
     scheduler = Scheduler(schedule_time=schedule_time)
-    scheduler.set_daily_task(task, run_immediately=run_immediately)
+    if schedule_tasks:
+        scheduler.set_daily_tasks(schedule_tasks, run_immediately=run_immediately)
+    else:
+        scheduler.set_daily_task(task, run_immediately=run_immediately)
     scheduler.run()
 
 

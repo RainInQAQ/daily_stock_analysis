@@ -183,6 +183,8 @@
 | `MAX_WORKERS` | 并发线程数 | `3` |
 | `MARKET_REVIEW_ENABLED` | 启用大盘复盘 | `true` |
 | `SCHEDULE_ENABLED` | 启用定时任务 | `false` |
+| `SCHEDULE_TASKS` | 多时间点定时任务（格式: HH:MM|true|1-5） | - |
+| `SCHEDULE_RUN_IMMEDIATELY` | 启动时是否立即执行一次 | `false` |
 | `SCHEDULE_TIME` | 定时执行时间 | `18:00` |
 | `LOG_DIR` | 日志目录 | `./logs` |
 
@@ -339,6 +341,13 @@ schedule:
 ```bash
 # 启动定时模式（默认 18:00 执行）
 python main.py --schedule
+
+# 多时间点定时（每个时间点独立控制大盘复盘）
+# 例: 周一至周五 19:00 启用复盘，周一至周五 12:00 关闭复盘，周六 20:00 启用复盘
+# 星期取值：1=周一 ... 7=周日，省略表示每天
+# SCHEDULE_TASKS=19:00|true|1-5,12:00|false|1-5,20:00|true|6
+# 启动时不立即执行
+# SCHEDULE_RUN_IMMEDIATELY=false
 
 # 或使用 crontab
 crontab -e

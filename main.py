@@ -428,9 +428,17 @@ def main() -> int:
             logger.info("模式: 定时任务")
             assert config.schedule_tasks, "schedule_tasks不能为空"
             logger.info("定时任务列表:")
+            def format_days_of_week(days_of_week: Optional[List[int]]) -> str:
+                if not days_of_week:
+                    return "每天"
+                return "周" + ",".join(str(day) for day in days_of_week)
+
             for schedule_task in config.schedule_tasks:
                 review_status = "启用" if schedule_task.market_review_enabled else "关闭"
-                logger.info(f"  - {schedule_task.time} (大盘复盘: {review_status})")
+                days_display = format_days_of_week(schedule_task.days_of_week)
+                logger.info(
+                    f"  - {schedule_task.time} ({days_display}, 大盘复盘: {review_status})"
+                )
             
             from src.scheduler import run_with_schedule
             
@@ -445,7 +453,11 @@ def main() -> int:
                 return scheduled_task
 
             schedule_tasks = [
-                (task_config.time, build_scheduled_task(task_config.market_review_enabled))
+                (
+                    task_config.time,
+                    build_scheduled_task(task_config.market_review_enabled),
+                    task_config.days_of_week
+                )
                 for task_config in config.schedule_tasks
             ]
             

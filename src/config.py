@@ -18,12 +18,18 @@ from dataclasses import dataclass, field
 
 SCHEDULE_TASK_TRUE_VALUES = {"true", "1", "yes", "y", "on"}
 SCHEDULE_TASK_FALSE_VALUES = {"false", "0", "no", "n", "off"}
+SCHEDULE_TASK_MIN_WEEKDAY = 1
+SCHEDULE_TASK_MAX_WEEKDAY = 7
+SCHEDULE_TASK_VALID_WEEKDAYS = set(
+    range(SCHEDULE_TASK_MIN_WEEKDAY, SCHEDULE_TASK_MAX_WEEKDAY + 1)
+)
 
 
 @dataclass(frozen=True)
 class ScheduleTaskConfig:
     time: str
     market_review_enabled: bool
+    days_of_week: Optional[List[int]] = None
 
 
 def _parse_bool(value: Optional[str], default_value: bool) -> bool:
@@ -39,6 +45,35 @@ def _parse_bool(value: Optional[str], default_value: bool) -> bool:
     return default_value
 
 
+def _parse_days_of_week(value: Optional[str]) -> Optional[List[int]]:
+    if value is None:
+        return None
+    normalized_value = value.strip().lower()
+    if not normalized_value:
+        return None
+    if '-' in normalized_value:
+        start_str, end_str = normalized_value.split('-', 1)
+        if not start_str or not end_str:
+            raise ValueError(f"无效的星期范围配置: {value}")
+        try:
+            start_day = int(start_str)
+            end_day = int(end_str)
+        except ValueError as exc:
+            raise ValueError(f"无效的星期范围配置: {value}") from exc
+        if start_day not in SCHEDULE_TASK_VALID_WEEKDAYS or end_day not in SCHEDULE_TASK_VALID_WEEKDAYS:
+            raise ValueError(f"星期范围必须为 {SCHEDULE_TASK_MIN_WEEKDAY}-{SCHEDULE_TASK_MAX_WEEKDAY}: {value}")
+        if start_day > end_day:
+            raise ValueError(f"星期范围起始值不能大于结束值: {value}")
+        return list(range(start_day, end_day + 1))
+    try:
+        day_value = int(normalized_value)
+    except ValueError as exc:
+        raise ValueError(f"无效的星期配置: {value}") from exc
+    if day_value not in SCHEDULE_TASK_VALID_WEEKDAYS:
+        raise ValueError(f"星期必须为 {SCHEDULE_TASK_MIN_WEEKDAY}-{SCHEDULE_TASK_MAX_WEEKDAY}: {value}")
+    return [day_value]
+
+
 def _parse_schedule_tasks(
     raw_value: str,
     default_market_review_enabled: bool
@@ -50,19 +85,28 @@ def _parse_schedule_tasks(
         item = item.strip()
         if not item:
             continue
-        if '|' in item:
-            time_value, review_value = item.split('|', 1)
-            schedule_time = time_value.strip()
-            if not schedule_time:
-                continue
-            market_review_enabled = _parse_bool(review_value, default_market_review_enabled)
-        else:
-            schedule_time = item
+        parts = [part.strip() for part in item.split('|')]
+        if len(parts) == 1:
+            schedule_time = parts[0]
             market_review_enabled = default_market_review_enabled
+            days_of_week = None
+        elif len(parts) == 2:
+            schedule_time, review_value = parts
+            market_review_enabled = _parse_bool(review_value, default_market_review_enabled)
+            days_of_week = None
+        elif len(parts) == 3:
+            schedule_time, review_value, days_value = parts
+            market_review_enabled = _parse_bool(review_value, default_market_review_enabled)
+            days_of_week = _parse_days_of_week(days_value)
+        else:
+            raise ValueError(f"无效的定时任务配置: {item}")
+        if not schedule_time:
+            raise ValueError(f"定时任务时间不能为空: {item}")
         schedule_tasks.append(
             ScheduleTaskConfig(
                 time=schedule_time,
-                market_review_enabled=market_review_enabled
+                market_review_enabled=market_review_enabled,
+                days_of_week=days_of_week
             )
         )
     return schedule_tasks
@@ -352,7 +396,8 @@ class Config:
             schedule_tasks = [
                 ScheduleTaskConfig(
                     time=schedule_time,
-                    market_review_enabled=market_review_enabled
+                    market_review_enabled=market_review_enabled,
+                    days_of_week=None
                 )
             ]
         
